@@ -1,0 +1,71 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: podcast-excerpt-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/excerpt_db}
+    username: ${DB_USERNAME:podcast}
+    password: ${DB_PASSWORD:podcast}
+    hikari:
+      maximum-pool-size: 5
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: podcast-excerpt-notifications-v1
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        allow.auto.create.topics: true
+    listener:
+      ack-mode: record
+      missing-topics-fatal: false
+    admin:
+      fail-fast: false
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 5
+    lease-expiration-duration-in-seconds: 10
+
+app:
+  security:
+    issuer: ${JWT_ISSUER:http://localhost:8180/realms/podcast-demo}
+    jwk-set-uri: ${JWT_JWK_SET_URI:http://localhost:8180/realms/podcast-demo/protocol/openid-connect/certs}
+    audience: ${JWT_AUDIENCE:podcast-api}
+  kafka:
+    topic: ${KAFKA_TOPIC:soa.s14.t04.events}
+    notification-topic: ${KAFKA_NOTIFICATION_TOPIC:soa.s14.t04.notifications}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  pattern:
+    level: "%5p [correlationId=%X{correlationId:-}]"

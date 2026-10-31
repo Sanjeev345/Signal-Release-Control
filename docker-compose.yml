@@ -1,0 +1,273 @@
+name: podcast-release-control
+
+x-backend: &backend
+  image: podcast-backend:local
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  networks:
+    - release-net
+
+x-backend-env: &backend-env
+  SPRING_PROFILES_ACTIVE: dev
+  KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+  EUREKA_URL: http://discovery-server:8761/eureka/
+  JWT_ISSUER: http://localhost:8180/realms/podcast-demo
+  JWT_JWK_SET_URI: http://keycloak:8180/realms/podcast-demo/protocol/openid-connect/certs
+  JWT_AUDIENCE: podcast-api
+  KAFKA_TOPIC: soa.s14.t04.events
+  KAFKA_NOTIFICATION_TOPIC: soa.s14.t04.notifications
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-podcast}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-podcast}
+      POSTGRES_DB: postgres
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-podcast} -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - release-net
+
+  kafka:
+    image: apache/kafka:3.9.2
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:19092,CONTROLLER://:9093,EXTERNAL://:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:19092,EXTERNAL://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 >/dev/null 2>&1 || exit 1"
+        ]
+      interval: 10s
+      timeout: 8s
+      retries: 20
+      start_period: 20s
+    networks:
+      - release-net
+
+  kafka-init:
+    image: apache/kafka:3.9.2
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
+          --create --if-not-exists --topic soa.s14.t04.events \
+          --partitions 3 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
+          --create --if-not-exists --topic soa.s14.t04.notifications \
+          --partitions 3 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
+          --describe --topic soa.s14.t04.events
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
+          --describe --topic soa.s14.t04.notifications
+    restart: "no"
+    networks:
+      - release-net
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    restart: unless-stopped
+    command:
+      ["start-dev", "--import-realm", "--http-port=8180", "--hostname=http://localhost:8180"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "false"
+    ports:
+      - "8180:8180"
+    volumes:
+      - ./infra/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8180' || exit 1"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks:
+      - release-net
+
+  discovery-server:
+    <<: *backend
+    container_name: discovery-server
+    command: ["java", "-jar", "/app/discovery-server.jar"]
+    environment:
+      <<: *backend-env
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -fsS http://localhost:8761/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  podcast-excerpt-service:
+    <<: *backend
+    container_name: podcast-excerpt-service
+    command: ["java", "-jar", "/app/podcast-excerpt-service.jar"]
+    environment:
+      <<: *backend-env
+      DB_URL: jdbc:postgresql://postgres:5432/excerpt_db
+      DB_USERNAME: ${POSTGRES_USER:-podcast}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-podcast}
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      discovery-server:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -fsS http://localhost:8081/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  guest-release-service:
+    <<: *backend
+    container_name: guest-release-service
+    command: ["java", "-jar", "/app/guest-release-service.jar"]
+    environment:
+      <<: *backend-env
+      DB_URL: jdbc:postgresql://postgres:5432/release_db
+      DB_USERNAME: ${POSTGRES_USER:-podcast}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-podcast}
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      discovery-server:
+        condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -fsS http://localhost:8082/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  distribution-task-service:
+    <<: *backend
+    container_name: distribution-task-service
+    command: ["java", "-jar", "/app/distribution-task-service.jar"]
+    environment:
+      <<: *backend-env
+      DB_URL: jdbc:postgresql://postgres:5432/distribution_db
+      DB_USERNAME: ${POSTGRES_USER:-podcast}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-podcast}
+    ports:
+      - "8083:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      discovery-server:
+        condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -fsS http://localhost:8083/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  api-gateway:
+    <<: *backend
+    container_name: api-gateway
+    command: ["java", "-jar", "/app/api-gateway.jar"]
+    environment:
+      <<: *backend-env
+    ports:
+      - "8080:8080"
+    depends_on:
+      discovery-server:
+        condition: service_started
+      keycloak:
+        condition: service_started
+      podcast-excerpt-service:
+        condition: service_started
+      guest-release-service:
+        condition: service_started
+      distribution-task-service:
+        condition: service_started
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  web-dashboard:
+    build:
+      context: ./web-dashboard
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
+        VITE_KEYCLOAK_URL: ${VITE_KEYCLOAK_URL:-http://localhost:8180}
+        VITE_KEYCLOAK_REALM: ${VITE_KEYCLOAK_REALM:-podcast-demo}
+        VITE_KEYCLOAK_CLIENT_ID: ${VITE_KEYCLOAK_CLIENT_ID:-podcast-dashboard}
+    image: podcast-dashboard:local
+    container_name: web-dashboard
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      api-gateway:
+        condition: service_started
+    networks:
+      - release-net
+
+volumes:
+  postgres-data:
+
+networks:
+  release-net:
+    driver: bridge

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://podcast.example/contracts/kafka/guest-excerpt-withdrawn-v1.schema.json",
+  "title": "GuestExcerptWithdrawn",
+  "description": "Published when a guest withdraws consent for exactly one tagged excerpt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "eventType",
+    "eventVersion",
+    "occurredAt",
+    "correlationId",
+    "releaseId",
+    "releaseScopeId",
+    "episodeId",
+    "excerptId",
+    "guestId",
+    "withdrawnBy",
+    "reason"
+  ],
+  "properties": {
+    "eventId": { "type": "string", "format": "uuid" },
+    "eventType": { "const": "GuestExcerptWithdrawn" },
+    "eventVersion": { "const": 1 },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "correlationId": { "type": "string", "minLength": 1 },
+    "releaseId": { "type": "string", "format": "uuid" },
+    "releaseScopeId": { "type": "string", "format": "uuid" },
+    "episodeId": { "type": "string", "format": "uuid" },
+    "excerptId": { "type": "string", "format": "uuid" },
+    "guestId": { "type": "string", "minLength": 1 },
+    "withdrawnBy": { "type": "string", "minLength": 1 },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 2000 }
+  }
+}

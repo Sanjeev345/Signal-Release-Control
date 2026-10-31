@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://podcast.example/contracts/kafka/withdrawal-accepted-v1.schema.json",
+  "title": "WithdrawalAcceptedResponse",
+  "description": "202 response contract for POST /api/releases/{releaseId}/scopes/{excerptId}/withdrawals.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["eventId", "releaseId", "excerptId", "status"],
+  "properties": {
+    "eventId": { "type": "string", "format": "uuid" },
+    "releaseId": { "type": "string", "format": "uuid" },
+    "excerptId": { "type": "string", "format": "uuid" },
+    "status": { "const": "WITHDRAWN_ACCEPTED" }
+  }
+}

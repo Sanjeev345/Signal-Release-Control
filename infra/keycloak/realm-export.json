@@ -1,0 +1,136 @@
+{
+  "realm": "podcast-demo",
+  "displayName": "Podcast Release Control",
+  "displayNameHtml": "Signal <strong>Release Control</strong>",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 3600,
+  "ssoSessionIdleTimeout": 7200,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      {
+        "name": "podcastProducer",
+        "description": "Can create episodes, tag excerpts, grant releases, and audit distribution."
+      },
+      {
+        "name": "guest",
+        "description": "Can view their own releases and withdraw consent for a single excerpt."
+      }
+    ]
+  },
+  "users": [
+    {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "username": "priya",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Priya",
+      "lastName": "Shah",
+      "email": "priya@signal.demo",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "producer123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "podcastProducer"
+      ],
+      "requiredActions": []
+    },
+    {
+      "id": "22222222-2222-2222-2222-222222222222",
+      "username": "ava",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Ava",
+      "lastName": "Rao",
+      "email": "ava@signal.demo",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "guest123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "guest"
+      ],
+      "requiredActions": []
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "podcast-dashboard",
+      "name": "Podcast Dashboard",
+      "description": "Demo SPA for producer and guest release control.",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "redirectUris": [
+        "http://localhost:5173/*",
+        "http://127.0.0.1:5173/*"
+      ],
+      "webOrigins": [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5173/*",
+        "oauth2.device.authorization.grant.enabled": "false"
+      },
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "web-origins",
+        "acr",
+        "basic"
+      ],
+      "protocolMappers": [
+        {
+          "name": "realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "podcast-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "podcast-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ]
+}

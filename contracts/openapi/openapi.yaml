@@ -1,0 +1,1341 @@
+openapi: 3.0.3
+info:
+  title: Signal Release Control API
+  version: 1.0.0
+  description: |
+    Public API exposed through Spring Cloud Gateway on port 8080.
+
+    All endpoints require a Keycloak-issued bearer token carrying the
+    `podcast-api` audience. Realm roles are `podcastProducer` and `guest`. The
+    gateway performs coarse route-level role checks; every service repeats
+    record-level ownership checks.
+
+    Paths are served under `/api` without a version segment; every path below is
+    absolute relative to the gateway origin.
+
+    Withdrawal semantics are excerpt-scoped: withdrawing one excerpt never
+    changes the guest's other scopes or other excerpts on the episode.
+servers:
+  - url: http://localhost:8080
+    description: Docker Compose demo through the gateway
+tags:
+  - name: Episodes
+  - name: Excerpts
+  - name: Excerpt Requests
+  - name: Releases
+  - name: Distribution
+  - name: Withdrawals
+  - name: Notifications
+
+paths:
+  /api/excerpts/episodes:
+    get:
+      tags: [Episodes]
+      summary: List episodes owned by the authenticated producer
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Producer-owned episodes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Episode'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Episodes]
+      summary: Create an episode
+      description: Requires role `podcastProducer`. The JWT subject becomes the owner.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEpisodeRequest'
+      responses:
+        '201':
+          description: Episode created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Episode'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/excerpts/episodes/available:
+    get:
+      tags: [Episodes]
+      summary: List published episodes available for excerpt requests
+      description: Available to guests and producers. Unpublished episodes are excluded.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Published episodes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EpisodeSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/excerpts/episodes/{episodeId}:
+    get:
+      tags: [Episodes]
+      summary: Get an owned episode
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/EpisodePathId'
+      responses:
+        '200':
+          description: Episode
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Episode'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/excerpts/episodes/{episodeId}/excerpts:
+    get:
+      tags: [Excerpts]
+      summary: List tagged excerpts for an episode
+      description: Producers only see their own episodes; guests only see their own excerpts.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/EpisodePathId'
+      responses:
+        '200':
+          description: Tagged excerpts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Excerpt'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Excerpts]
+      summary: Tag a new excerpt on an episode
+      description: Requires role `podcastProducer` and ownership of the episode.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/EpisodePathId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExcerptRequest'
+      responses:
+        '201':
+          description: Excerpt tagged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Excerpt'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/excerpts/requests:
+    post:
+      tags: [Excerpt Requests]
+      summary: Submit an excerpt request
+      description: |
+        Requires role `guest`. The guest identity comes from the JWT subject.
+        Submitting never creates an excerpt or consent; only approval does.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitExcerptRequest'
+      responses:
+        '201':
+          description: Request created as PENDING
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExcerptRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      tags: [Excerpt Requests]
+      summary: List requests for the producer's episodes
+      description: Requires role `podcastProducer`. Only requests on owned episodes are returned.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestStatusFilter'
+      responses:
+        '200':
+          description: Requests for owned episodes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExcerptRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/excerpts/requests/me:
+    get:
+      tags: [Excerpt Requests]
+      summary: List the authenticated guest's requests
+      description: Requires role `guest`. Other guests' requests are never returned.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestStatusFilter'
+      responses:
+        '200':
+          description: The guest's own requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExcerptRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/excerpts/requests/{requestId}:
+    get:
+      tags: [Excerpt Requests]
+      summary: Get a single request
+      description: A guest may read only their own request; a producer only requests on owned episodes.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestPathId'
+      responses:
+        '200':
+          description: Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExcerptRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/excerpts/requests/{requestId}/approve:
+    post:
+      tags: [Excerpt Requests]
+      summary: Approve a pending request
+      description: |
+        Requires role `podcastProducer` and ownership of the episode. Approval
+        calls the existing excerpt service so excerpt tags, codes and events stay
+        consistent, then notifies the guest. Already-decided requests return 409.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestPathId'
+      responses:
+        '200':
+          description: Approved request with the created excerpt id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExcerptRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Request has already been decided
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/excerpts/requests/{requestId}/reject:
+    post:
+      tags: [Excerpt Requests]
+      summary: Reject a pending request
+      description: |
+        Requires role `podcastProducer` and ownership of the episode. The reason is
+        optional and included in the guest notification when supplied.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestPathId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectExcerptRequest'
+      responses:
+        '200':
+          description: Rejected request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExcerptRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Request has already been decided
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/releases:
+    get:
+      tags: [Releases]
+      summary: List releases for an owned episode
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/EpisodeId'
+      responses:
+        '200':
+          description: Releases for the episode
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Release'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Releases]
+      summary: Grant a guest release for one or more excerpts
+      description: Requires role `podcastProducer` and ownership of the episode.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReleaseRequest'
+      responses:
+        '201':
+          description: Release created with one scope per excerpt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Release'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/releases/me:
+    get:
+      tags: [Releases]
+      summary: List the authenticated guest's releases
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Guest releases
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Release'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/releases/{releaseId}:
+    get:
+      tags: [Releases]
+      summary: Get a release
+      description: A guest may read their own release; a producer may read releases for owned episodes.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReleaseId'
+      responses:
+        '200':
+          description: Release
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Release'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/releases/{releaseId}/audit:
+    get:
+      tags: [Releases]
+      summary: List withdrawal audit entries for a release
+      description: A guest may read their own release audit; a producer may read audit for owned episodes. Entries are append-only and include the event id and correlation id.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReleaseId'
+      responses:
+        '200':
+          description: Audit entries ordered by occurrence time
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditEntry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/releases/{releaseId}/scopes/{excerptId}/withdrawals:
+    post:
+      tags: [Withdrawals]
+      summary: Withdraw consent for exactly one excerpt
+      description: |
+        Requires role `guest` and ownership of the release. The operation is
+        idempotent: replaying a withdrawal for an already-withdrawn scope returns
+        the original event id without creating a second event or task set.
+
+        Returns 202 immediately after committing the scope state and outbox
+        event. Kafka publication and task creation are asynchronous.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReleaseId'
+        - name: excerptId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawalRequest'
+      responses:
+        '202':
+          description: Withdrawal accepted; event is queued for publication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithdrawalAccepted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/distribution/edits:
+    get:
+      tags: [Distribution]
+      summary: List distributed edits and their removal tasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/EpisodeId'
+      responses:
+        '200':
+          description: Edits with nested tasks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Edit'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/distribution/tasks:
+    get:
+      tags: [Distribution]
+      summary: List removal tasks
+      description: |
+        With `excerptId`, a guest owner or the owning producer can read that
+        excerpt's tasks. Without `excerptId`, the endpoint is producer-only and
+        spans the producer's owned episodes, optionally filtered by episode,
+        platform and status.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: excerptId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: episodeId
+          in: query
+          required: false
+          description: Producer-only scope filter.
+          schema:
+            type: string
+            format: uuid
+        - name: provider
+          in: query
+          required: false
+          description: Producer-only platform filter.
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          description: Producer-only status filter.
+          schema:
+            type: string
+            enum: [OPEN, IN_PROGRESS, DONE]
+      responses:
+        '200':
+          description: Removal tasks, usually exactly one per carrying edit
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Task'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/distribution/tasks/{taskId}:
+    get:
+      tags: [Distribution]
+      summary: Get one removal task
+      description: A guest may read tasks for their own excerpts; a producer only for owned episodes.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TaskPathId'
+      responses:
+        '200':
+          description: Task
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Distribution]
+      summary: Update a removal task
+      description: |
+        Requires role `podcastProducer` and ownership of the task's episode.
+        A null `status` leaves the status unchanged so notes and an evidence URL
+        can be recorded without a transition. A supplied status must follow
+        `OPEN -> IN_PROGRESS -> DONE`. `DONE` records producer completion only and
+        does not imply that an external platform API was called. Every update
+        records the producer subject in `updatedBy`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TaskPathId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskRequest'
+      responses:
+        '200':
+          description: Updated task
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Invalid status transition or stale task version
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/distribution/tasks/{taskId}/status:
+    patch:
+      tags: [Distribution]
+      summary: Advance a removal task through its workflow
+      description: |
+        Requires role `podcastProducer` and ownership of the task's episode.
+        Allowed transitions are `OPEN -> IN_PROGRESS -> DONE`; completing a task
+        stamps `completedAt`. Skipping a step is rejected with `409`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskStatusRequest'
+      responses:
+        '200':
+          description: Updated task
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Invalid status transition or stale task version
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/notifications:
+    get:
+      tags: [Notifications]
+      summary: List the authenticated user's notifications
+      description: |
+        Notifications are scoped to the JWT subject. Guests and producers each see
+        only their own notifications. Use `unreadOnly` to filter the inbox.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: unreadOnly
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: The user's notifications, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/notifications/{notificationId}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark one notification as read
+      description: The notification must belong to the authenticated user; otherwise 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Updated notification
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/notifications/read-all:
+    post:
+      tags: [Notifications]
+      summary: Mark all of the authenticated user's notifications as read
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Number of notifications updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [updated]
+                properties:
+                  updated:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    EpisodePathId:
+      name: episodeId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    EpisodeId:
+      name: episodeId
+      in: query
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ReleaseId:
+      name: releaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RequestPathId:
+      name: requestId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TaskPathId:
+      name: taskId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RequestStatusFilter:
+      name: status
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [PENDING, APPROVED, REJECTED]
+
+  responses:
+    BadRequest:
+      description: Invalid request or invariant violation
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: Authenticated but not allowed for this record
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Resource not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    Problem:
+      type: object
+      properties:
+        type:
+          type: string
+          example: about:blank
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        code:
+          type: string
+          example: BAD_REQUEST
+        traceId:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    CreateEpisodeRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          maxLength: 255
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    Episode:
+      type: object
+      required: [id, code, title, producerId, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          example: ep-2026-001
+        title:
+          type: string
+        producerId:
+          type: string
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    EpisodeSummary:
+      type: object
+      required: [id, code, title]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          example: ep-2026-001
+        title:
+          type: string
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    CreateExcerptRequest:
+      type: object
+      required: [guestId, startMs, endMs]
+      properties:
+        guestId:
+          type: string
+          maxLength: 64
+        startMs:
+          type: integer
+          format: int64
+          minimum: 0
+        endMs:
+          type: integer
+          format: int64
+          minimum: 1
+        transcript:
+          type: string
+          maxLength: 20000
+
+    Excerpt:
+      type: object
+      required: [id, code, episodeId, guestId, startMs, endMs, tagStatus, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          example: ex-ava-020500
+        episodeId:
+          type: string
+          format: uuid
+        guestId:
+          type: string
+        startMs:
+          type: integer
+          format: int64
+        endMs:
+          type: integer
+          format: int64
+        transcript:
+          type: string
+          nullable: true
+        tagStatus:
+          type: string
+          enum: [ACTIVE, REDACTED]
+        createdAt:
+          type: string
+          format: date-time
+
+    SubmitExcerptRequest:
+      type: object
+      required: [episodeId, title, startMs, endMs]
+      properties:
+        episodeId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 2000
+          nullable: true
+        startMs:
+          type: integer
+          format: int64
+          minimum: 0
+        endMs:
+          type: integer
+          format: int64
+          minimum: 1
+
+    RejectExcerptRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 2000
+          nullable: true
+
+    ExcerptRequest:
+      type: object
+      required: [id, episodeId, episodeTitle, guestId, title, startMs, endMs, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        episodeId:
+          type: string
+          format: uuid
+        episodeTitle:
+          type: string
+        guestId:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        startMs:
+          type: integer
+          format: int64
+        endMs:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+        rejectionReason:
+          type: string
+          nullable: true
+        excerptId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Present only after approval.
+        decidedBy:
+          type: string
+          nullable: true
+        decidedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Notification:
+      type: object
+      required: [id, message, eventType, read, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        message:
+          type: string
+          maxLength: 1000
+        eventType:
+          type: string
+          enum:
+            [REQUEST_SUBMITTED, REQUEST_APPROVED, REQUEST_REJECTED, CONSENT_WITHDRAWN, TASK_COMPLETED]
+        read:
+          type: boolean
+        relatedId:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateReleaseRequest:
+      type: object
+      required: [guestId, episodeId, excerptIds]
+      properties:
+        guestId:
+          type: string
+          format: uuid
+        episodeId:
+          type: string
+          format: uuid
+        excerptIds:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            format: uuid
+        scopeType:
+          type: string
+          enum: [PODCAST_DISTRIBUTION]
+          default: PODCAST_DISTRIBUTION
+
+    Release:
+      type: object
+      required: [id, guestId, episodeId, status, grantedAt, scopes]
+      properties:
+        id:
+          type: string
+          format: uuid
+        guestId:
+          type: string
+        episodeId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [ACTIVE, WITHDRAWN]
+        grantedAt:
+          type: string
+          format: date-time
+        withdrawnAt:
+          type: string
+          format: date-time
+          nullable: true
+        withdrawnBy:
+          type: string
+          nullable: true
+        withdrawalReason:
+          type: string
+          nullable: true
+        scopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Scope'
+
+    Scope:
+      type: object
+      required: [id, excerptId, scopeType, status, grantedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        excerptId:
+          type: string
+          format: uuid
+        excerptCode:
+          type: string
+          nullable: true
+        startMs:
+          type: integer
+          format: int64
+          nullable: true
+        endMs:
+          type: integer
+          format: int64
+          nullable: true
+        scopeType:
+          type: string
+          enum: [PODCAST_DISTRIBUTION]
+        status:
+          type: string
+          enum: [ACTIVE, WITHDRAWN]
+        grantedAt:
+          type: string
+          format: date-time
+        withdrawnAt:
+          type: string
+          format: date-time
+          nullable: true
+        withdrawnBy:
+          type: string
+          nullable: true
+        withdrawalReason:
+          type: string
+          nullable: true
+
+    WithdrawalRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+
+    WithdrawalAccepted:
+      type: object
+      required: [eventId, releaseId, excerptId, status]
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        releaseId:
+          type: string
+          format: uuid
+        excerptId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [WITHDRAWN_ACCEPTED]
+
+    Task:
+      type: object
+      required: [id, editId, excerptId, eventId, taskType, status, priority, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        editId:
+          type: string
+          format: uuid
+        editCode:
+          type: string
+          nullable: true
+        provider:
+          type: string
+          nullable: true
+        excerptId:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+        taskType:
+          type: string
+          enum: [EXCERPT_REMOVAL]
+        status:
+          type: string
+          enum: [OPEN, IN_PROGRESS, DONE]
+        priority:
+          type: string
+          enum: [LOW, NORMAL, HIGH]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          maxLength: 4000
+          nullable: true
+        evidenceUrl:
+          type: string
+          maxLength: 2048
+          nullable: true
+        updatedBy:
+          type: string
+          nullable: true
+          description: Subject of the last producer who updated the task.
+
+    UpdateTaskStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [IN_PROGRESS, DONE]
+
+    UpdateTaskRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [IN_PROGRESS, DONE]
+          description: Omit to update notes or evidence without changing the status.
+        notes:
+          type: string
+          maxLength: 4000
+          nullable: true
+        evidenceUrl:
+          type: string
+          maxLength: 2048
+          nullable: true
+          description: Must be an http(s) URL when supplied.
+
+    AuditEntry:
+      type: object
+      required: [id, releaseId, scopeId, excerptId, action, actorId, reason, occurredAt, eventId, correlationId]
+      properties:
+        id:
+          type: string
+          format: uuid
+        releaseId:
+          type: string
+          format: uuid
+        scopeId:
+          type: string
+          format: uuid
+        excerptId:
+          type: string
+          format: uuid
+        action:
+          type: string
+          example: WITHDRAWAL
+        actorId:
+          type: string
+        reason:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        eventId:
+          type: string
+          format: uuid
+        correlationId:
+          type: string
+
+    Edit:
+      type: object
+      required: [id, code, episodeId, provider, externalReference, distributionStatus, distributedAt, tasks]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          example: edit-youtube-001
+        episodeId:
+          type: string
+          format: uuid
+        provider:
+          type: string
+          example: YouTube
+        externalReference:
+          type: string
+        distributionStatus:
+          type: string
+          enum: [DISTRIBUTED, PENDING, REMOVED]
+        distributedAt:
+          type: string
+          format: date-time
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'

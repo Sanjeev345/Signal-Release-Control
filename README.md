@@ -60,6 +60,8 @@ Seeded records:
 
 ## Architecture
 
+Visual architecture canvas: [Signal Release Control](docs/Signal-Release-Control.canvas)
+
 ```text
                          ┌──────────────────────┐
                          │  React dashboard     │

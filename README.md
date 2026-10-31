@@ -60,7 +60,27 @@ Seeded records:
 
 ## Architecture
 
-Visual architecture canvas: [Signal Release Control](docs/Signal-Release-Control.canvas)
+### Visual architecture
+
+```mermaid
+flowchart LR
+  guest[Guest] --> dashboard[React dashboard]
+  producer[Producer] --> dashboard
+  dashboard --> gateway[Spring Cloud Gateway<br/>JWT validation and routing]
+  gateway --> excerpt[podcast-excerpt-service<br/>requests, excerpts, notifications]
+  gateway --> release[guest-release-service<br/>releases, scopes, withdrawals]
+  gateway --> distribution[distribution-task-service<br/>tasks and edit matching]
+  gateway -. service discovery .-> eureka[Eureka]
+  gateway -. authentication .-> keycloak[Keycloak]
+  release -->|transactional outbox| kafka[(Kafka<br/>GuestExcerptWithdrawn)]
+  kafka --> distribution
+  excerpt --> excerptdb[(excerpt_db)]
+  release --> releasedb[(release_db)]
+  distribution --> distributiondb[(distribution_db)]
+  distribution --> tasks[Removal tasks<br/>OPEN -> IN_PROGRESS -> DONE]
+```
+
+Editable source: [Signal Release Control canvas](docs/Signal-Release-Control.canvas)
 
 ```text
                          ┌──────────────────────┐
